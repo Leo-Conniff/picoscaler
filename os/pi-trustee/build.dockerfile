@@ -4,7 +4,6 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Yocto host dependencies for whinlatter
 # https://docs.yoctoproject.org/5.3/ref-manual/system-requirements.html
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential chrpath cpio debianutils diffstat file gawk gcc \
     git iputils-ping libacl1 locales python3 python3-git python3-jinja2 \
