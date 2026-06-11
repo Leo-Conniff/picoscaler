@@ -1,30 +1,164 @@
 # Raspberry Pi 5 Trustee for Confidential Containers
-This project is designed to bootstrap a Raspberry Pi 5 with a custom lightweight immutable OS that strictly runs the components for validating confidential container attestations. It runs:
-1. Trustee KBS - main interface for incoming requests and acts as a relying party in RATS model
-1. AS CoCo - Confidential Container Attestation Service which is the verifier component in RATS model and veries TEE evidence
-1. RSVP - Reference Value Provider Service which holds the all the known good measurements for hardware. These values must be secure.
+
+This project builds a lightweight, immutable OS image for Raspberry Pi 5 that runs the [Trustee](https://github.com/confidential-containers/trustee) attestation stack for confidential containers. It runs:
+
+1. **Trustee KBS** — the Key Broker Service; primary interface for incoming requests and the relying party in the RATS model
+2. **CoCo AS** — the Confidential Containers Attestation Service; the verifier component in the RATS model that evaluates TEE evidence
+3. **RSVP** — the Reference Value Provider Service; holds known-good measurements for hardware, which must be protected from modification
 
 ## Why Raspberry Pi 5 for Trustee?
-For this particular configuration, the raspberry pi 5 is being considered the trust anchor for the overall hyposcalar environment. It will NOT be the primary holder of secrets or act as the mediator to hardware backed secrets. Its purpose is to validate that the core CA (OpenBao in this case) is running in a secured environment in a confidential container before releasing the pin that will unlock the hardware backed key material (YubiKey in this architecture). While the pi 5 may lack physical tamper resitant hardware and physical memory isolation, it does allow for secureboot and has the ability to store an encryption key to a LUKS partition during OTP provisioning. So if an attacker has direct physical access to the device, they could read those values out of ram to get access to the encrypted values. 
 
-For the sake of this project, this level of compromise is acceptable and still provides a split responsibility model where stealing the pi 5 without the yubikey connected machine just leaks the pin to the yubikey and stealing/gaining access to just the server without the raspberry pi will not allow openbao to run or access any senstive secrets. In a more robust environment, these components would be backed by more capable HSMs and trust anchor would be silicon based direct from a manufacturer. In this model, securing the pi 5 via secure boot is the "manufacturing process" in this model.
+The Pi 5 acts as the trust anchor for the hyposcaler environment. Its role is not to hold secrets directly, but to validate that the core CA (OpenBao) is running in a secured confidential container before releasing the PIN that unlocks hardware-backed key material (a YubiKey in this architecture).
 
-## Key requirments
-### Paritioning
-It is absolutely crucial that the storage for the pi 5 be split into at least 4 paritions:
-1. Boot partition that holds essentially the initramfs
-1. Primary os partition that is the read only root file system
-1. Secondary os partition for performing os updates and ota
-1. Configuration and secret partition which is encrypted and stores any durable information required by the Trustee ecosystem
+While the Pi 5 lacks physical tamper-resistant hardware and hardware memory isolation, it supports Secure Boot and can store an encryption key for a LUKS partition set during OTP provisioning. An attacker with direct physical access could read values from RAM to access encrypted data, but the split-responsibility model still holds: stealing the Pi 5 alone exposes only the YubiKey PIN, and gaining access only to the server leaves OpenBao unable to run or access any secrets.
 
-The os partition is chosen as read only and will be verified with dm-verity on boot. A read only partition is chosen to ensure the os is immutable and is not encrypted for both simplicity and performance since there is no sensistive information in the root fs itself.
+In a more robust deployment these components would be backed by HSMs and a silicon-rooted trust anchor. In this model, Secure Boot on the Pi 5 is the equivalent of a manufacturing trust establishment process.
 
-To ensure that the root fs can be read only, any configuration or secrets must have an encrypted partition to live so that data is not extractable at rest.
+## Storage Layout
 
-### OS
-The operating system should remain as lightweight as possible to minimize surface areas for potential compromise since this is acting as the core trust anchor. The only services outside the linux kernel and hardware drivers required are the KBS, AS and RSVP services and their dependencies. The services can be launched via Docker or run via a Kubernetes operator. Some possibilities for OS include Talos linux, Headless Ubuntu, etc. For the purposes of this project, a yocto oriented build has been chosen. This provides some level of control over the build process, can be run in a TEE built and signed in a trusted build container and can be performed without runtime emulation for an arm environment.
+Storage for the Pi 5 must be split into at least four partitions:
 
-The yocto image is based on the core meta-yocto layer and the meta-raspberrypi layer found here: https://github.com/agherzan/meta-raspberrypi It is an approved layer with the Yocto Project Compatible Layers Program.
+| Partition | Purpose |
+|---|---|
+| Boot | Holds the initramfs; read by the bootloader |
+| Primary OS | Read-only root filesystem; verified with dm-verity on boot |
+| Secondary OS | Staging partition for OTA updates and A/B switching |
+| Config/Secrets | Encrypted partition for durable configuration and secrets required by the Trustee stack |
 
-### Trustee
-All images/libraries/containers for the Trustee ecosystem are pulled directly from source https://github.com/confidential-containers/trustee
+The root filesystem is intentionally read-only and unencrypted as there is no sensitive data in it. This keeps the design simple and fast. Any configuration or secrets must reside in the encrypted partition so they are not extractable at rest.
+
+## OS Design
+
+The OS is built with [Yocto](https://www.yoctoproject.org/) targeting the `raspberrypi5` machine with the [meta-raspberrypi](https://github.com/agherzan/meta-raspberrypi) BSP layer. All layer repos track `master`. The custom `meta-pi-trustee` layer carries the layers to add the Trustee services and configurations needed for the Pi 5.
+
+Yocto is chosen for its minimal footprint, full control over included packages, and the ability to produce a reproducible, signed image for an `aarch64` target without runtime emulation.
+
+The only services outside the kernel and board support packages are the KBS, AS, and RSVP binaries and their runtime dependencies.
+
+## Building
+
+All builds run inside the build Docker container defined in the project root, which bundles the Yocto host dependencies and [kas](https://kas.readthedocs.io/) (v4.4) for layer and configuration management.
+
+### Prerequisites
+
+- Docker
+- ~100 GB of free disk space
+- Cache volumes for downloads and sstate are optional but strongly recommended. Without them every build re-fetches all sources and recompiles from scratch
+
+### macOS: Case-Sensitive Filesystem Setup
+
+Yocto requires a case-sensitive filesystem. macOS uses case-insensitive APFS by default, which causes build failures. Run the setup script once before your first build on macOS to create case-sensitive APFS sparse bundle images:
+
+```bash
+bash scripts/setup-macos.sh
+```
+
+This creates two sparse bundles in `$HOME` (consuming only actual used space up to the size limit):
+
+| Image | Mount point | Size limit |
+|---|---|---|
+| `~/yocto-workspace.sparsebundle` | `/Volumes/yocto-workspace` | 150 GB |
+| `~/yocto-cache.sparsebundle` | `/Volumes/yocto-cache` | 200 GB |
+
+The script is idempotent and it skips creation if the bundle already exists and skips mounting if already attached. Re-run it after a reboot before building.
+
+On Linux, set the variables below to directories on a native ext4/xfs filesystem instead.
+
+### Environment Variables
+
+Set these before running any build command. On macOS these correspond to the sparse bundle volumes:
+
+```bash
+export WORKSPACE_VOL=/Volumes/yocto-workspace/meta-pi-trustee
+export DOWNLOAD_VOL=/Volumes/yocto-cache/downloads
+export SSTATE_VOL=/Volumes/yocto-cache/sstate
+```
+
+### 1. Build the Docker image
+
+Run once from the `os/pi-trustee` project root, or after any changes to `build.dockerfile`:
+
+```bash
+docker build \
+  -f build.dockerfile \
+  -t pi-trustee-builder \
+  .
+```
+
+### 2. Sync the meta layer to the workspace volume
+
+The `meta-pi-trustee` layer must be present in the workspace volume before the build starts. The build container reads from the workspace volume, not from the repository checkout directly.
+
+From the `os/pi-trustee` project root:
+
+```bash
+rsync -av --delete \
+  meta-pi-trustee/ \
+  "${WORKSPACE_VOL}/"
+```
+
+Run this step whenever anything in `meta-pi-trustee/` has changed (recipes, configuration, kas file). On macOS, ensure the workspace sparse bundle is mounted (step above) before running this.
+
+### 3. Build the Yocto image
+
+On macOS, a separate Docker-managed volume (`yocto-tmp`) holds BitBake's temporary files. this ensures the tmp directory sits on a native filesystem regardless of the workspace volume, which avoids symlink compatibility issues. On Linux, you can specify a local folder mount point instead.
+
+```bash
+docker run --rm \
+  -v "${WORKSPACE_VOL}:/workspace" \
+  -v "${DOWNLOAD_VOL}:/cache/downloads" \
+  -v "${SSTATE_VOL}:/cache/sstate" \
+  -v yocto-tmp:/cache/tmp \
+  pi-trustee-builder
+```
+
+kas clones the required layers (`openembedded-core`, `meta-yocto`, `meta-raspberrypi`) into the workspace on first run, configures the build environment, and invokes BitBake to produce a `core-image-minimal` for `raspberrypi5`.
+
+The finished image will be at:
+
+```
+${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/core-image-minimal-raspberrypi5-rootfs***.wic.bz2
+```
+
+### 4. Flash the image
+
+```bash
+bunzip2 -k "${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/core-image-minimal-raspberrypi5-rootfs***.wic.bz2"
+bmaptool copy core-image-minimal-raspberrypi5.wic /dev/sdX
+```
+
+Replace `/dev/sdX` with the target SD card device (e.g. `/dev/sda` on Linux, `/dev/disk4` on macOS).
+
+## Reproducible Builds
+
+After a successful build, generate a lock file to pin all layer commits to the exact revisions used:
+
+```bash
+docker run --rm \
+  -v "${WORKSPACE_VOL}:/workspace" \
+  pi-trustee-builder dump --lock kas-pi-trustee.yml
+```
+
+Copy the resulting `kas-pi-trustee.lock.yml` into `meta-pi-trustee/` and commit it. kas loads the lock file automatically on subsequent runs, making builds byte-for-byte reproducible.
+
+## Useful kas Commands
+
+Pass these as arguments to override the default `docker run` command:
+
+```bash
+# Drop into a shell with the Yocto environment initialised (for manual bitbake runs)
+docker run --rm -it \
+  -v "${WORKSPACE_VOL}:/workspace" \
+  -v "${DOWNLOAD_VOL}:/cache/downloads" \
+  -v "${SSTATE_VOL}:/cache/sstate" \
+  -v yocto-tmp:/cache/tmp \
+  pi-trustee-builder shell kas-pi-trustee.yml
+
+# Fetch and check out all layers without starting a build
+docker run --rm \
+  -v "${WORKSPACE_VOL}:/workspace" \
+  -v "${DOWNLOAD_VOL}:/cache/downloads" \
+  -v "${SSTATE_VOL}:/cache/sstate" \
+  -v yocto-tmp:/cache/tmp \
+  pi-trustee-builder checkout kas-pi-trustee.yml
+```

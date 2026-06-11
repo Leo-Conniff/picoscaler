@@ -1,0 +1,49 @@
+header:
+  version: 14
+
+machine: raspberrypi5
+distro: poky
+target: core-image-minimal
+
+repos:
+  bitbake:
+    url: https://git.openembedded.org/bitbake
+    path: layers/bitbake
+    branch: master
+    layers: {}
+
+  openembedded-core:
+    url: https://git.openembedded.org/openembedded-core
+    path: layers/openembedded-core
+    branch: master
+    layers:
+      meta:
+  
+  meta-yocto:
+    url: https://git.yoctoproject.org/meta-yocto
+    path: layers/meta-yocto
+    branch: master
+    layers:
+      meta-poky:
+    
+  meta-raspberrypi:
+    url: https://github.com/agherzan/meta-raspberrypi
+    branch: master
+
+  meta-pi-trustee:
+
+local_conf_header:
+  base: |
+    CONF_VERSION = "2"
+    IMAGE_FSTYPES = "wic.bz2 wic.bmap"
+
+  perf: |
+    BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
+    PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
+
+  rpi5: |
+    # Minimal GPU memory allocation for a headless build
+    GPU_MEM = "16"
+    ENABLE_UART = "0"
+    # Accept Synaptics firmware license required by Pi 5 WiFi firmware packages
+    LICENSE_FLAGS_ACCEPTED = "synaptics-killswitch"
