@@ -2,8 +2,8 @@ header:
   version: 14
 
 machine: raspberrypi5
-distro: poky
-target: core-image-minimal
+distro: pi-trustee-distro
+target: pi-trustee
 
 repos:
   bitbake:
@@ -48,7 +48,6 @@ repos:
 local_conf_header:
   base: |
     CONF_VERSION = "2"
-    IMAGE_FSTYPES = "wic.bz2 wic.bmap"
     # There is an issue with this recipe in wrynose currently; not needed
     BBMASK += "meta-networking/recipes-devtools/python/python3-scapy_.*\.bb"
 
@@ -62,11 +61,3 @@ local_conf_header:
     ENABLE_UART = "0"
     # Accept Synaptics firmware license required by Pi 5 WiFi firmware packages
     LICENSE_FLAGS_ACCEPTED = "synaptics-killswitch"
-
-  virtualization: |
-    DISTRO_FEATURES:append = " virtualization systemd systemd-compat-units usrmerge"
-    DISTRO_FEATURES:remove = "sysvinit"
-    VIRTUAL-RUNTIME_init_manager = "systemd"
-    DISTRO_FEATURES_OPTED_OUT = "sysvinit"
-    VIRTUAL-RUNTIME_initscripts = "systemd-compat-units"
-    IMAGE_INSTALL:append = " containerd runc iptables iproute2 cni"
