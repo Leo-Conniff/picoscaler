@@ -30,12 +30,27 @@ repos:
     url: https://github.com/agherzan/meta-raspberrypi
     branch: master
 
+  meta-openembedded:
+    url: https://github.com/openembedded/meta-openembedded
+    branch: master
+    layers:
+      meta-oe:
+      meta-networking:
+      meta-python:
+      meta-filesystems:
+
+  meta-virtualization:
+    url: https://git.yoctoproject.org/meta-virtualization
+    branch: master
+
   meta-pi-trustee:
 
 local_conf_header:
   base: |
     CONF_VERSION = "2"
     IMAGE_FSTYPES = "wic.bz2 wic.bmap"
+    # There is an issue with this recipe in wrynose currently; not needed
+    BBMASK += "meta-networking/recipes-devtools/python/python3-scapy_.*\.bb"
 
   perf: |
     BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
@@ -47,3 +62,11 @@ local_conf_header:
     ENABLE_UART = "0"
     # Accept Synaptics firmware license required by Pi 5 WiFi firmware packages
     LICENSE_FLAGS_ACCEPTED = "synaptics-killswitch"
+
+  virtualization: |
+    DISTRO_FEATURES:append = " virtualization systemd systemd-compat-units usrmerge"
+    DISTRO_FEATURES:remove = "sysvinit"
+    VIRTUAL-RUNTIME_init_manager = "systemd"
+    DISTRO_FEATURES_OPTED_OUT = "sysvinit"
+    VIRTUAL-RUNTIME_initscripts = "systemd-compat-units"
+    IMAGE_INSTALL:append = " containerd runc iptables iproute2 cni"
