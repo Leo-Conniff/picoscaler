@@ -99,7 +99,21 @@ rsync -av --delete \
 
 Run this step whenever anything in `meta-pi-trustee/` has changed (recipes, configuration, kas file). On macOS, ensure the workspace sparse bundle is mounted (step above) before running this.
 
-### 3. Build the Yocto image
+### 3. Fetch container images
+
+The Yocto build bakes the Trustee container images directly into the root filesystem. Pull them from ghcr.io before building using the prep script:
+
+```bash
+export CONTAINER_ARCHIVE=/path/to/container/cache
+
+bash scripts/container-prep.sh
+```
+
+This requires skopeo on the host. It archives the containers in the docker archive format for installation on the yocto image.
+
+The images are loaded into containerd at boot by `trustee-container-loader.service`. You can verify after boot with `nerdctl images`.
+
+### 4. Build the Yocto image
 
 On macOS, a separate Docker-managed volume (`yocto-tmp`) holds BitBake's temporary files. this ensures the tmp directory sits on a native filesystem regardless of the workspace volume, which avoids symlink compatibility issues. On Linux, you can specify a local folder mount point instead.
 
@@ -108,6 +122,7 @@ docker run --rm \
   -v "${WORKSPACE_VOL}:/workspace" \
   -v "${DOWNLOAD_VOL}:/cache/downloads" \
   -v "${SSTATE_VOL}:/cache/sstate" \
+  -v "${CONTAINER_ARCHIVE}:/cache/containers" \
   -v yocto-tmp:/cache/tmp \
   pi-trustee-builder
 ```
@@ -120,7 +135,7 @@ The finished image will be at:
 ${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/core-image-minimal-raspberrypi5-rootfs***.wic.bz2
 ```
 
-### 4. Flash the image
+### 5. Flash the image
 
 ```bash
 bunzip2 -k "${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/core-image-minimal-raspberrypi5-rootfs***.wic.bz2"

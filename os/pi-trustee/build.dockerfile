@@ -22,13 +22,13 @@ RUN pip3 install --no-cache-dir kas==${KAS_VERSION}
 # Bitbake must be run as non-root user
 RUN groupadd -r bitbakegroup \
     && useradd -r -g bitbakegroup -m bitbake
-RUN mkdir -p /workspace /cache/downloads /cache/sstate /cache/tmp\
+RUN mkdir -p /workspace /cache/containers /cache/downloads /cache/sstate /cache/tmp\
     && chown -R bitbake:bitbakegroup /workspace /cache
 
 USER bitbake
 
 # Cache volumes for both idempotency and saving downloads between builds
-VOLUME ["/cache/downloads", "/cache/sstate"]
+VOLUME ["/cache/downloads", "/cache/sstate", "/cache/containers"]
 
 WORKDIR /workspace
 
@@ -36,6 +36,7 @@ WORKDIR /workspace
 ENV MACHINE=raspberrypi5 \
     DL_DIR=/cache/downloads \
     SSTATE_DIR=/cache/sstate \
+    CONTAINER_ARCHIVE=/cache/containers \
     TMPDIR=/cache/tmp \
     BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE DL_DIR SSTATE_DIR KAS_BUILD_DIR DISTRO"
 

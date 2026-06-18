@@ -1,0 +1,14 @@
+[Unit]
+Description=Load Trustee container images
+After=containerd.service
+Requires=containerd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/nerdctl load -i /usr/share/trustee-containers/kbs.tar
+ExecStart=/usr/bin/nerdctl load -i /usr/share/trustee-containers/rvps.tar
+ExecStart=/usr/bin/nerdctl load -i /usr/share/trustee-containers/attest.tar
+
+[Install]
+WantedBy=multi-user.target
