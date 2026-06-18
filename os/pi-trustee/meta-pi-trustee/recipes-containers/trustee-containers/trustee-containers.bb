@@ -8,7 +8,6 @@ SYSTEMD_SERVICE:${PN} = "trustee-container-loader.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 # CONTAINER_TARS set based on CONTAINER_ARCHIVE env var in kas conf
-
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:${CONTAINER_TARS}:"
 
 # Some versions of Yocto will auto extract tar files. So save as archive ext and copy
