@@ -44,13 +44,16 @@ repos:
     branch: master
 
   meta-pi-trustee:
-
+env:
+  CONTAINER_ARCHIVE: null
 local_conf_header:
   base: |
     CONF_VERSION = "2"
     # There is an issue with this recipe in wrynose currently; not needed
     BBMASK += "meta-networking/recipes-devtools/python/python3-scapy_.*\.bb"
 
+  external_artifacts: |
+    CONTAINER_TARS = "${@os.environ.get('CONTAINER_ARCHIVE', '/cache/containers')}"
   perf: |
     BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
     PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"

@@ -4,4 +4,5 @@ SUMMARY = "Custom image for raspberry pi 5 that runs a complete KBS Trustee clus
 LICENSE = "MIT"
 
 
-IMAGE_INSTALL:append = " cni containerd nerdctl iproute2 iptables runc"
+IMAGE_INSTALL:append = " cni containerd containerd-tmpfs nerdctl iproute2 iptables runc trustee-containers volatile-binds"
+EXTRA_IMAGE_FEATURES += "read-only-rootfs"
