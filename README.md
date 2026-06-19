@@ -1,2 +1,2 @@
-# hyposcaler
-Configuration, services and diagrams for setting up a home hyposcaler.
+# picoscaler
+Configuration, services and diagrams for setting up a small scale homelab with hardware rooted trust.
