@@ -1,0 +1,12 @@
+[Unit]
+Description=Deploy Trustee stack via Helm
+After=k3s.service
+Requires=k3s.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/trustee-helm-deploy.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,66 @@
+{{- if .Values.rvps.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trustee-rvps
+  labels:
+    {{- include "trustee.labels" . | nindent 4 }}
+    app.kubernetes.io/name: trustee-rvps
+    app.kubernetes.io/component: rvps
+spec:
+  replicas: {{ .Values.rvps.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trustee-rvps
+      app.kubernetes.io/component: rvps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trustee-rvps
+        app.kubernetes.io/component: rvps
+    spec:
+      containers:
+        - name: rvps
+          image: "{{ .Values.rvps.image.repository }}:{{ .Values.rvps.image.tag }}"
+          imagePullPolicy: {{ default .Values.global.imagePullPolicy .Values.rvps.image.pullPolicy | quote }}
+          command: ["/usr/local/bin/rvps"]
+          args:
+            - "--socket"
+            - "0.0.0.0:{{ .Values.rvps.service.targetPort }}"
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.rvps.service.targetPort }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.rvps.resources | nindent 12 }}
+          {{- if .Values.rvps.persistence.enabled }}
+          volumeMounts:
+            - name: rvps-storage
+              mountPath: {{ .Values.rvps.config.storageDir }}
+          {{- end }}
+      {{- if .Values.rvps.persistence.enabled }}
+      volumes:
+        - name: rvps-storage
+          hostPath:
+            path: {{ .Values.rvps.persistence.hostPath }}/{{ .Values.rvps.persistence.rvpsSubPath }}
+            type: DirectoryOrCreate
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trustee-rvps
+  labels:
+    {{- include "trustee.labels" . | nindent 4 }}
+    app.kubernetes.io/name: trustee-rvps
+spec:
+  type: {{ .Values.rvps.service.type }}
+  ports:
+    - port: {{ .Values.rvps.service.port }}
+      targetPort: {{ .Values.rvps.service.targetPort }}
+      protocol: TCP
+      name: grpc
+  selector:
+    app.kubernetes.io/name: trustee-rvps
+    app.kubernetes.io/component: rvps
+{{- end }}

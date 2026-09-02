@@ -1,0 +1,84 @@
+global:
+  imagePullPolicy: Never
+
+kbs:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/confidential-containers/staged-images/kbs-grpc-as
+    tag: latest
+    pullPolicy: Never
+  service:
+    type: NodePort
+    port: 8080
+    targetPort: 8080
+    nodePort: 30080
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+  persistence:
+    enabled: true
+    hostPath: /var/lib/trustee/data
+    kbsSubPath: kbs
+    certsSubPath: certs
+  config:
+    insecureHttp: true
+    authPublicKeysDir: /opt/confidential-containers/kbs/certs
+    repositoryDir: /opt/confidential-containers/kbs/repository
+    asAddr: "http://trustee-as:50004"
+    rvpsAddr: "http://trustee-rvps:50003"
+
+as:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/confidential-containers/staged-images/coco-as-grpc
+    tag: latest
+    pullPolicy: Never
+  service:
+    type: ClusterIP
+    port: 50004
+    targetPort: 50004
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+  persistence:
+    enabled: true
+    hostPath: /var/lib/trustee/data
+    asSubPath: as
+  config:
+    rvpsAddr: "http://trustee-rvps:50003"
+    policyDir: /opt/confidential-containers/attestation-service/data
+
+rvps:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/confidential-containers/staged-images/rvps
+    tag: latest
+    pullPolicy: Never
+  service:
+    type: ClusterIP
+    port: 50003
+    targetPort: 50003
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+  persistence:
+    enabled: true
+    hostPath: /var/lib/trustee/data
+    rvpsSubPath: rvps
+  config:
+    storageDir: /opt/confidential-containers/rvps/reference-values

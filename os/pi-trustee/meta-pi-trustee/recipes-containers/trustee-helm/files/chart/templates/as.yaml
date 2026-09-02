@@ -1,0 +1,68 @@
+{{- if .Values.as.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trustee-as
+  labels:
+    {{- include "trustee.labels" . | nindent 4 }}
+    app.kubernetes.io/name: trustee-as
+    app.kubernetes.io/component: as
+spec:
+  replicas: {{ .Values.as.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trustee-as
+      app.kubernetes.io/component: as
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trustee-as
+        app.kubernetes.io/component: as
+    spec:
+      containers:
+        - name: as
+          image: "{{ .Values.as.image.repository }}:{{ .Values.as.image.tag }}"
+          imagePullPolicy: {{ default .Values.global.imagePullPolicy .Values.as.image.pullPolicy | quote }}
+          command: ["/usr/local/bin/grpc-as"]
+          args:
+            - "--socket"
+            - "0.0.0.0:{{ .Values.as.service.targetPort }}"
+            - "--rvps-addr"
+            - "{{ .Values.as.config.rvpsAddr }}"
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.as.service.targetPort }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.as.resources | nindent 12 }}
+          {{- if .Values.as.persistence.enabled }}
+          volumeMounts:
+            - name: as-policy
+              mountPath: {{ .Values.as.config.policyDir }}
+          {{- end }}
+      {{- if .Values.as.persistence.enabled }}
+      volumes:
+        - name: as-policy
+          hostPath:
+            path: {{ .Values.as.persistence.hostPath }}/{{ .Values.as.persistence.asSubPath }}
+            type: DirectoryOrCreate
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trustee-as
+  labels:
+    {{- include "trustee.labels" . | nindent 4 }}
+    app.kubernetes.io/name: trustee-as
+spec:
+  type: {{ .Values.as.service.type }}
+  ports:
+    - port: {{ .Values.as.service.port }}
+      targetPort: {{ .Values.as.service.targetPort }}
+      protocol: TCP
+      name: grpc
+  selector:
+    app.kubernetes.io/name: trustee-as
+    app.kubernetes.io/component: as
+{{- end }}
