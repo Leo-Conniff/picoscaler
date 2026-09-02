@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare k3s airgap images and trustee storage directories
+Before=k3s.service
+After=var-lib-rancher.mount local-fs.target
+Requires=var-lib-rancher.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/k3s-prepare.sh
+
+[Install]
+WantedBy=multi-user.target

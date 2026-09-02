@@ -1,6 +1,6 @@
 # Raspberry Pi 5 Trustee for Confidential Containers
 
-This project builds a lightweight, immutable OS image for Raspberry Pi 5 that runs the [Trustee](https://github.com/confidential-containers/trustee) attestation stack for confidential containers. It runs:
+This project builds a lightweight, immutable OS image for Raspberry Pi 5 that runs the [Trustee](https://github.com/confidential-containers/trustee) attestation stack for confidential containers using **k3s** and **Helm**. It runs:
 
 1. **Trustee KBS** — the Key Broker Service; primary interface for incoming requests and the relying party in the RATS model
 2. **CoCo AS** — the Confidential Containers Attestation Service; the verifier component in the RATS model that evaluates TEE evidence
@@ -16,24 +16,29 @@ In a more robust deployment these components would be backed by HSMs and a silic
 
 ## Storage Layout
 
-Storage for the Pi 5 must be split into at least four partitions:
+Storage for the Pi 5 is split into four partitions:
 
-| Partition | Purpose |
-|---|---|
-| Boot | Holds the initramfs; read by the bootloader |
-| Primary OS | Read-only root filesystem; verified with dm-verity on boot |
-| Secondary OS | Staging partition for OTA updates and A/B switching |
-| Config/Secrets | Encrypted partition for durable configuration and secrets required by the Trustee stack |
+| Partition | Mount Point / Purpose | Description |
+|---|---|---|
+| **Boot** | `/boot` | Holds the initramfs and kernel; read by the bootloader |
+| **Primary OS** | `/` | Active read-only root filesystem; verified with dm-verity on boot |
+| **Secondary OS** | Staging | Standby partition for atomic A/B OTA OS updates |
+| **Config/Secrets** | `/var/lib/trustee/data` | Encrypted LUKS partition for durable keys, TLS certificates, policies, and reference values |
 
-The root filesystem is intentionally read-only and unencrypted as there is no sensitive data in it. This keeps the design simple and fast. Any configuration or secrets must reside in the encrypted partition so they are not extractable at rest.
+The root filesystem is strictly read-only and immutable. Ephemeral state for k3s (`/var/lib/rancher`, `/var/lib/kubelet`) runs on `tmpfs`. Durable secrets and certificates are bound directly from `/var/lib/trustee/data` to the Trustee pods via `hostPath` volumes.
+
+## Air-Gapped & Immutable Architecture
+
+The target Raspberry Pi 5 operates in a **strictly air-gapped environment** with no internet access at runtime:
+
+- **Immutable A/B Updates**: Container images, Helm charts, and k3s binaries are locked build artifacts baked directly into the rootfs. Updates occur atomically via A/B partition swaps.
+- **Strict Local Image Policy (`imagePullPolicy: Never`)**: All Trustee pods enforce `Never`. Kubelet will fail immediately rather than ever attempting network access.
+- **Pre-Baked Container Archives**: All container images (`kbs`, `as`, `rvps`, `pause`, `coredns`) are pre-fetched at build time, baked into `/usr/share/k3s-images/`, and automatically loaded by k3s at boot.
+- **Offline Helm Deployment**: The Helm chart and production `values.yaml` are bundled in `/usr/share/trustee-helm/` and deployed by `trustee-helm-deploy.service` on boot.
 
 ## OS Design
 
-The OS is built with [Yocto](https://www.yoctoproject.org/) targeting the `raspberrypi5` machine with the [meta-raspberrypi](https://github.com/agherzan/meta-raspberrypi) BSP layer. All layer repos track `master`. The custom `meta-pi-trustee` layer carries the layers to add the Trustee services and configurations needed for the Pi 5.
-
-Yocto is chosen for its minimal footprint, full control over included packages, and the ability to produce a reproducible, signed image for an `aarch64` target without runtime emulation.
-
-The only services outside the kernel and board support packages are the KBS, AS, and RSVP binaries and their runtime dependencies.
+The OS is built with [Yocto](https://www.yoctoproject.org/) targeting the `raspberrypi5` machine with the [meta-raspberrypi](https://github.com/agherzan/meta-raspberrypi) BSP layer and `meta-virtualization`. All layer repos track `master`. The custom `meta-pi-trustee` layer packages the Trustee Helm chart, k3s offline configuration, and boot-time deployment units.
 
 ## Building
 
@@ -41,9 +46,11 @@ All builds run inside the build Docker container defined in the project root, wh
 
 ### Prerequisites
 
-- Docker
+- Docker (allocate at least 12–16 GB RAM and 4+ GB Swap in Docker Desktop Settings -> Resources)
+- `skopeo` (for container image caching during prep)
+- `helm` (optional; if missing, prep script falls back to dockerized helm)
 - ~100 GB of free disk space
-- Cache volumes for downloads and sstate are optional but strongly recommended. Without them every build re-fetches all sources and recompiles from scratch
+- Cache volumes for downloads and sstate
 
 ### macOS: Case-Sensitive Filesystem Setup
 
@@ -53,20 +60,16 @@ Yocto requires a case-sensitive filesystem. macOS uses case-insensitive APFS by 
 bash scripts/setup-macos.sh
 ```
 
-This creates two sparse bundles in `$HOME` (consuming only actual used space up to the size limit):
+This creates two sparse bundles in `$HOME`:
 
 | Image | Mount point | Size limit |
 |---|---|---|
 | `~/yocto-workspace.sparsebundle` | `/Volumes/yocto-workspace` | 150 GB |
 | `~/yocto-cache.sparsebundle` | `/Volumes/yocto-cache` | 200 GB |
 
-The script is idempotent and it skips creation if the bundle already exists and skips mounting if already attached. Re-run it after a reboot before building.
-
-On Linux, set the variables below to directories on a native ext4/xfs filesystem instead.
-
 ### Environment Variables
 
-Set these before running any build command. On macOS these correspond to the sparse bundle volumes:
+Set these before running any build command:
 
 ```bash
 export WORKSPACE_VOL=/Volumes/yocto-workspace/meta-pi-trustee
@@ -87,8 +90,6 @@ docker build \
 
 ### 2. Sync the meta layer to the workspace volume
 
-The `meta-pi-trustee` layer must be present in the workspace volume before the build starts. The build container reads from the workspace volume, not from the repository checkout directly.
-
 From the `os/pi-trustee` project root:
 
 ```bash
@@ -97,11 +98,9 @@ rsync -av --delete \
   "${WORKSPACE_VOL}/"
 ```
 
-Run this step whenever anything in `meta-pi-trustee/` has changed (recipes, configuration, kas file). On macOS, ensure the workspace sparse bundle is mounted (step above) before running this.
+### 3. Fetch container images (Helm-driven)
 
-### 3. Fetch container images
-
-The Yocto build bakes the Trustee container images directly into the root filesystem. Pull them from ghcr.io before building using the prep script:
+The build script uses `helm template` against the Trustee Helm chart and `values.yaml` to dynamically discover and archive all required container images and k3s system airgap images:
 
 ```bash
 export CONTAINER_ARCHIVE=/path/to/container/cache
@@ -109,13 +108,7 @@ export CONTAINER_ARCHIVE=/path/to/container/cache
 bash scripts/container-prep.sh
 ```
 
-This requires skopeo on the host. It archives the containers in the docker archive format for installation on the yocto image.
-
-The images are loaded into containerd at boot by `trustee-container-loader.service`. You can verify after boot with `nerdctl images`.
-
 ### 4. Build the Yocto image
-
-On macOS, a separate Docker-managed volume (`yocto-tmp`) holds BitBake's temporary files. this ensures the tmp directory sits on a native filesystem regardless of the workspace volume, which avoids symlink compatibility issues. On Linux, you can specify a local folder mount point instead.
 
 ```bash
 docker run --rm \
@@ -127,53 +120,79 @@ docker run --rm \
   pi-trustee-builder
 ```
 
-kas clones the required layers (`openembedded-core`, `meta-yocto`, `meta-raspberrypi`) into the workspace on first run, configures the build environment, and invokes BitBake to produce a `core-image-minimal` for `raspberrypi5`.
-
 The finished image will be at:
 
 ```
-${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/core-image-minimal-raspberrypi5-rootfs***.wic.bz2
+${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/pi-trustee-raspberrypi5-*.rootfs.wic.bz2
 ```
 
 ### 5. Flash the image
 
+Flash the generated image to your target SD card or drive using **[Balena Etcher](https://etcher.balena.io/)**:
+
+1. Open Balena Etcher.
+2. Select **Flash from file** and choose the built `.wic.bz2` (or decompressed `.wic`) image from:
+   ```
+   ${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/pi-trustee-raspberrypi5-*.rootfs.wic.bz2
+   ```
+3. Select your target SD card / storage drive and click **Flash!**.
+
+*(Alternative CLI option with bmaptool)*:
 ```bash
-bunzip2 -k "${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/core-image-minimal-raspberrypi5-rootfs***.wic.bz2"
-bmaptool copy core-image-minimal-raspberrypi5.wic /dev/sdX
+bunzip2 -k "${WORKSPACE_VOL}/build/tmp/deploy/images/raspberrypi5/pi-trustee-raspberrypi5-*.rootfs.wic.bz2"
+bmaptool copy pi-trustee-raspberrypi5-*.rootfs.wic /dev/sdX
 ```
 
-Replace `/dev/sdX` with the target SD card device (e.g. `/dev/sda` on Linux, `/dev/disk4` on macOS).
+## Enabling Root Login for Testing & Validation
+
+By default, the production image is hardened and headless with no TTY login and no default root user. To enable command-line validation on a connected monitor and keyboard:
+
+### 1. Enable `debug-tweaks` in `kas-pi-trustee.yml`
+
+Add `debug-tweaks` to `local_conf_header` in `kas-pi-trustee.yml` (or your build's `local.conf`):
+
+```yaml
+local_conf_header:
+  debug: |
+    # Enable passwordless root login (allow-root-login, empty-root-password)
+    EXTRA_IMAGE_FEATURES += "debug-tweaks"
+```
+
+### 2. Log in via Monitor & Keyboard (TTY)
+
+1. Connect an HDMI display and USB keyboard to the Raspberry Pi 5.
+2. Boot the device. Once startup completes, you will see the `pi-trustee login:` prompt on screen (`tty1`).
+3. Type `root` and press **Enter** (no password required) to access the shell.
+
+## Runtime Verification on Raspberry Pi 5
+
+Once logged in at the console, you can inspect the air-gapped k3s cluster and Helm deployment:
+
+```bash
+# Verify k3s service and node status
+systemctl status k3s
+kubectl get nodes -o wide
+
+# Verify all images were imported locally into containerd
+crictl images
+
+# Verify image pull policy is strictly "Never"
+kubectl get pods -n coco-trustee -o jsonpath='{..imagePullPolicy}'
+
+# Verify Helm release and pod health
+helm list -n coco-trustee
+kubectl get pods -n coco-trustee -o wide
+
+# Test KBS HTTP endpoint
+curl -i http://localhost:8080/kbs/v0/version
+```
 
 ## Reproducible Builds
 
-After a successful build, generate a lock file to pin all layer commits to the exact revisions used:
+After a successful build, generate a lock file to pin all layer commits:
 
 ```bash
 docker run --rm \
   -v "${WORKSPACE_VOL}:/workspace" \
   pi-trustee-builder dump --lock kas-pi-trustee.yml
-```
-
-Copy the resulting `kas-pi-trustee.lock.yml` into `meta-pi-trustee/` and commit it. kas loads the lock file automatically on subsequent runs, making builds byte-for-byte reproducible.
-
-## Useful kas Commands
-
-Pass these as arguments to override the default `docker run` command:
-
-```bash
-# Drop into a shell with the Yocto environment initialised (for manual bitbake runs)
-docker run --rm -it \
-  -v "${WORKSPACE_VOL}:/workspace" \
-  -v "${DOWNLOAD_VOL}:/cache/downloads" \
-  -v "${SSTATE_VOL}:/cache/sstate" \
-  -v yocto-tmp:/cache/tmp \
-  pi-trustee-builder shell kas-pi-trustee.yml
-
-# Fetch and check out all layers without starting a build
-docker run --rm \
-  -v "${WORKSPACE_VOL}:/workspace" \
-  -v "${DOWNLOAD_VOL}:/cache/downloads" \
-  -v "${SSTATE_VOL}:/cache/sstate" \
-  -v yocto-tmp:/cache/tmp \
-  pi-trustee-builder checkout kas-pi-trustee.yml
 ```

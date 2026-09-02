@@ -1,0 +1,13 @@
+[Unit]
+Description=Setup k3s /var/lib/rancher tmpfs mount point
+Before=k3s.service k3s-prepare.service
+After=volatile-binds.service
+
+[Mount]
+What=tmpfs
+Where=/var/lib/rancher
+Type=tmpfs
+Options=mode=0755,strictatime
+
+[Install]
+WantedBy=local-fs.target

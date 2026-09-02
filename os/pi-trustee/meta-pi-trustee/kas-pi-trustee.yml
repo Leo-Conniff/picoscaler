@@ -57,6 +57,13 @@ local_conf_header:
   perf: |
     BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
     PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
+    # Note: by default distro is headless, but these optimize if desktop env is installed
+    # Throttle concurrency for memory-intensive toolchain builds to prevent Docker OOM (exit 137)
+    PARALLEL_MAKE:pn-llvm-native = "-j 2"
+    PARALLEL_MAKE:pn-clang-native = "-j 2"
+    PARALLEL_MAKE:pn-rust-native = "-j 2"
+    # Restrict LLVM targets to Pi 5 target architectures to reduce build time & RAM usage
+    LLVM_TARGETS_TO_BUILD ?= "AArch64;ARM;BPF"
 
   rpi5: |
     # Minimal GPU memory allocation for a headless build
@@ -64,3 +71,5 @@ local_conf_header:
     ENABLE_UART = "0"
     # Accept Synaptics firmware license required by Pi 5 WiFi firmware packages
     LICENSE_FLAGS_ACCEPTED = "synaptics-killswitch"
+    # Enable cgroups for k3s container runtime
+    CMDLINE:append = " cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory"

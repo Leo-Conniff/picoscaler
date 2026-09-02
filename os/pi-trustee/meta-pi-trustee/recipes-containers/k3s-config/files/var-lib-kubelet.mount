@@ -1,0 +1,13 @@
+[Unit]
+Description=Setup k3s /var/lib/kubelet tmpfs mount point
+Before=k3s.service
+After=volatile-binds.service
+
+[Mount]
+What=tmpfs
+Where=/var/lib/kubelet
+Type=tmpfs
+Options=mode=0755,strictatime
+
+[Install]
+WantedBy=local-fs.target

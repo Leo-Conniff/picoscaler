@@ -1,0 +1,3 @@
+# Raspberry Pi 5 deployment overrides for Trustee Helm chart
+# All standard configs, image tags, ports, and persistence default to chart/values.yaml.
+# Specify any host- or deployment-specific overrides below:
